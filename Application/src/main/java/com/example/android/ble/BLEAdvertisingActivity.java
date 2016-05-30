@@ -64,6 +64,7 @@ public class BLEAdvertisingActivity extends FragmentActivity {
             // Set result and finish this Activity
             setResult(Activity.RESULT_OK, intent);
             mBleChat.unregister(mBLEAdvCallback);
+            //mBleChat.stopAdvertising();
             finish();
         }
 

@@ -14,8 +14,13 @@ public class BLEChatProfile {
     public static UUID DESCRIPTOR_MESSAGE_UUID = UUID.fromString("45bda094-ff40-4cb8-835d-0da8742bb1eb");
     public static UUID CHARACTERISTIC_VERSION_UUID = UUID.fromString("BD28E457-4026-4270-A99F-F9BC20182E15");
     public static UUID CHARACTERISTIC_DESC_UUID = UUID.fromString("FDD00F2A-DAA3-47F5-8715-9DE659E5EB7B");
-    public static UUID CHARACTERISTIC_TRANSFER_RATE_UUID = UUID.fromString("34df5318-94de-4c1d-af31-31616c7fd9dd");
-    public static UUID DESCRIPTOR_TRANSFER_RATE_UUID = UUID.fromString("42a210d6-b6c5-4f82-a9cc-67d0e1d76a1e");
+    public static UUID CHARACTERISTIC_RFCOMM_TRANSFER_UUID = UUID.fromString("34df5318-94de-4c1d-af31-31616c7fd9dd");
+    public static UUID DESCRIPTOR_RFCOMM_TRANSFER_UUID = UUID.fromString("42a210d6-b6c5-4f82-a9cc-67d0e1d76a1e");
+    public static UUID CHARACTERISTIC_BLE_TRANSFER_UUID = UUID.fromString("482f1096-137b-46cc-8ca8-3457c15cc433");
+    public static UUID DESCRIPTOR_BLE_TRANSFER_UUID = UUID.fromString("421ecb34-bb49-4b70-a5ea-042c1f38ec32");
+
+    public static final int SEND_INTERVAL = 100;
+
 
     private static String mVersion = "1";
     private static String mDescription = "BLEChat - Juan Gomez :_AtilA_";

@@ -7,4 +7,6 @@ import android.bluetooth.BluetoothDevice;
  */
 public interface BLEPeripheralChatEvents extends BLEChatEvents {
     void onClientDisconnect(BluetoothDevice device);
+    void onInitRfcommSocket();
+    void onConnectRfcommSocket();
 }

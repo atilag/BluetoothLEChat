@@ -18,12 +18,14 @@ package com.example.android.bluetoothchat;
 
 import android.app.ActionBar;
 import android.app.Activity;
+import android.app.ProgressDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothProfile;
+import android.content.Context;
 import android.content.Intent;
-import android.content.res.ObbInfo;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.support.annotation.Nullable;
@@ -47,12 +49,19 @@ import android.widget.Toast;
 import com.example.android.ble.BLEAdvertisingActivity;
 import com.example.android.ble.BLECentralHelper;
 import com.example.android.ble.BLECentralChatEvents;
-import com.example.android.ble.BLEChatProfile;
+import com.example.android.ble.BLEChatEvents;
 import com.example.android.ble.BLEDiscoveringActivity;
 import com.example.android.ble.BLEMode;
 import com.example.android.ble.BLEPeripheralChatEvents;
 import com.example.android.ble.BLEPeripheralHelper;
 import com.example.android.common.logger.Log;
+
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.concurrent.Semaphore;
 
 /**
  * This fragment controls Bluetooth to communicate with other devices.
@@ -68,6 +77,7 @@ public class BluetoothChatFragment extends Fragment {
     private static final int REQUEST_ENABLE_BT = 3;
     private static final int BLE_REQUEST_CONNECT_DEVICE = 11;
     private static final int BLE_REQUEST_DEVICE_CONNECTING = 12;
+    private static final int PICK_IMAGE = 21;
 
     // Layout Views
     private ListView mConversationView;
@@ -99,6 +109,15 @@ public class BluetoothChatFragment extends Fragment {
      */
     private BluetoothChatService mChatService = null;
 
+    /**
+     * My Progress bar for transfer rates
+     */
+    private ProgressDialog mProgressBar = null;
+    private int mProgressBarStatus = 0;
+
+    private StreamThread mStreamThread = null;
+
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -112,6 +131,8 @@ public class BluetoothChatFragment extends Fragment {
             Toast.makeText(activity, "Bluetooth is not available", Toast.LENGTH_LONG).show();
             activity.finish();
         }
+
+        setupProgressBar(getContext());
     }
 
     @Override
@@ -143,13 +164,13 @@ public class BluetoothChatFragment extends Fragment {
         // Performing this check in onResume() covers the case in which BT wasbuffer
         // not enabled during onStart(), so we were paused to enable it...
         // onResume() will be called when ACTION_REQUEST_ENABLE activity returns.
-        if (mChatService != null) {
+        /*if (mChatService != null) {
             // Only if the state is STATE_NONE, do we know that we haven't started already
             if (mChatService.getState() == BluetoothChatService.STATE_NONE) {
                 // Start the Bluetooth chat services
                 mChatService.start();
             }
-        }
+        }*/
     }
 
     @Override
@@ -187,7 +208,7 @@ public class BluetoothChatFragment extends Fragment {
                 if (null != view) {
                     TextView textView = (TextView) view.findViewById(R.id.edit_text_out);
                     String message = textView.getText().toString();
-                    sendMessage(message);
+                    processOutgoingMsg(message);
                 }
             }
         });
@@ -211,7 +232,35 @@ public class BluetoothChatFragment extends Fragment {
         }
     }
 
-        private synchronized void sendMessage(String message) {
+    private synchronized void processOutgoingMsg(String message){
+        if(message.startsWith("/")){
+            String[] tokens = message.split(" ", 2);
+            if(tokens[0].compareTo("/transfertest") == 0){
+                // We change the MTU to 512 first
+                mHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        BLECentralHelper.getInstance().changeMtu(512);
+                    }
+                }, 2100);
+                return;
+            }else if(tokens[0].compareTo("/transfer") == 0){
+                sendStream();
+                return;
+            }
+        }
+        sendMessage(message);
+    }
+
+    private void sendStream(){
+        if(mBleMode == BLEMode.PERIPHERAL ){
+            BLEPeripheralHelper.getInstance().sendStream();
+        }else if(mBleMode == BLEMode.CENTRAL){
+            BLECentralHelper.getInstance().sendData();
+        }
+    }
+
+    private synchronized void sendMessage(String message) {
         //sendMessageViaClassicBT(message);
         sendMessageViaBLE(message);
     }
@@ -284,6 +333,10 @@ public class BluetoothChatFragment extends Fragment {
         actionBar.setSubtitle(subTitle);
     }
 
+    /**
+     * This method is part of an automatic ping-ping conversation like.
+     * @param msg
+     */
     private void answerBack(String msg){
         final String mMsg = msg;
         mHandler.postDelayed(new Runnable() {
@@ -303,8 +356,11 @@ public class BluetoothChatFragment extends Fragment {
 
 
     /**
+     *
      *  Some helper methods for the mHandler messaging mechanism
+     *
      **/
+
     private void showIncomingMessage(String msg){
         mHandler.obtainMessage(Constants.MESSAGE_READ, msg.length(), -1, msg.getBytes())
                 .sendToTarget();
@@ -321,6 +377,7 @@ public class BluetoothChatFragment extends Fragment {
         bundle.putString(Constants.TOAST, info);
         msg.setData(bundle);
         mHandler.sendMessage(msg);
+        Log.i(TAG, info);
     }
 
     private void showStatus(int status){
@@ -334,13 +391,14 @@ public class BluetoothChatFragment extends Fragment {
         bundle.putString(Constants.DEVICE_NAME, name);
         msg.setData(bundle);
         mHandler.sendMessage(msg);
+        setState(BluetoothChatService.STATE_CONNECTED);
     }
 
     private void setState(int newState){
         switch (newState) {
             case BluetoothChatService.STATE_CONNECTED:
                 setStatus(getString(R.string.title_connected_to, mConnectedDeviceName));
-                mConversationArrayAdapter.clear();
+                //mConversationArrayAdapter.clear();
                 break;
             case BluetoothChatService.STATE_CONNECTING:
                 setStatus(R.string.title_connecting);
@@ -394,6 +452,8 @@ public class BluetoothChatFragment extends Fragment {
         }
     };
 
+
+
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         switch (requestCode) {
             case REQUEST_CONNECT_DEVICE_SECURE:
@@ -429,6 +489,11 @@ public class BluetoothChatFragment extends Fragment {
             case BLE_REQUEST_DEVICE_CONNECTING:
                 if( resultCode == Activity.RESULT_OK){
                     bleDeviceConnecting(data);
+                }
+                break;
+            case PICK_IMAGE:
+                if( resultCode == Activity.RESULT_OK){
+                    sendFile(data);
                 }
         }
     }
@@ -516,7 +581,7 @@ public class BluetoothChatFragment extends Fragment {
     private synchronized void sendMessageViaBLE(String message) {
         // Check that there's actually something to send
         if (message.length() > 0) {
-            if(mBleMode == BLEMode.PERIPHERAL ){
+            if(mBleMode == BLEMode.PERIPHERAL){
                 BLEPeripheralHelper.getInstance().send(message);
             }else if(mBleMode == BLEMode.CENTRAL){
                 BLECentralHelper.getInstance().send(message);
@@ -526,6 +591,15 @@ public class BluetoothChatFragment extends Fragment {
             mOutStringBuffer.setLength(0);
             mOutEditText.setText(mOutStringBuffer);
         }
+    }
+
+    /**
+     * Sends the selected file to the Peripheral device
+     * @param data
+     */
+    private void sendFile(Intent data){
+        Uri uri = data.getData();
+        BLECentralHelper.getInstance().sendFile(uri);
     }
 
     /**
@@ -542,6 +616,8 @@ public class BluetoothChatFragment extends Fragment {
         showStatus(BluetoothChatService.STATE_CONNECTING);
         BLECentralHelper.getInstance().connect(this.getContext(), device, mBLEChatEvents);
     }
+
+
     private BLECentralChatEvents mBLEChatEvents = new BLECentralChatEvents() {
         private Object mLock = new Object();
         @Override
@@ -561,7 +637,7 @@ public class BluetoothChatFragment extends Fragment {
         @Override
         public void onMessage(String msg) {
             synchronized (mLock){
-                showIncomingMessage(msg);
+                processIncomingMsg(msg);
             }
         }
 
@@ -575,8 +651,14 @@ public class BluetoothChatFragment extends Fragment {
         @Override
         public void onConnect(){
             synchronized (mLock){
-                showConnectedName(mConnectedDeviceName);
-                showStatus(BluetoothChatService.STATE_CONNECTED);
+                mHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        sendMessage("/name Z3C");
+                        showConnectedName(mConnectedDeviceName);
+                        showStatus(BluetoothChatService.STATE_CONNECTED);
+                    }
+                }, 2000);
             }
         }
 
@@ -590,14 +672,81 @@ public class BluetoothChatFragment extends Fragment {
                 mHandler.sendMessage(msg);
 
                 showStatus(BluetoothChatService.STATE_NONE);
+                if(mProgressBar!=null){
+                    mProgressBar.dismiss();
+                    mProgressBar.hide();
+                }
+
             }
         }
 
         @Override
         public void onConnectionError(String error){
             synchronized (mLock){
+                if(mStreamThread!=null)
+                    mStreamThread.end();
+
+                mProgressBar.dismiss();
+                mProgressBar.cancel();
+
                 showStatus(BluetoothChatService.STATE_NONE);
                 showInfo("[!] Error : " + error);
+
+            }
+        }
+
+        @Override
+        public void onRfcommConnect(){
+            synchronized (mLock) {
+                Intent intent = new Intent();
+                intent.setType("image/*");
+                intent.setAction(Intent.ACTION_GET_CONTENT);
+                startActivityForResult(Intent.createChooser(intent, "Select Picture"), PICK_IMAGE);
+            }
+        }
+
+        @Override
+        public void onData(byte [] data){
+            synchronized (mLock){
+                showInfo("Not implemented yet");
+            }
+        }
+
+        private int mLastLength = 0;
+        @Override
+        public void onDataStream(byte[] data){
+            synchronized (mLock){
+                if( mLastLength != data.length ) {
+                    showInfo("Received " + data.length + " bytes via BLE!");
+                    mLastLength = data.length;
+                }
+                //showIncomingMessage(new String(data));
+            }
+        }
+
+        @Override
+        public void onStreamSent(int status){
+            synchronized (mLock) {
+                if (status == BLEChatEvents.SENT_SUCCEED) {
+                    mStreamThread.nextMessage();
+                } else {
+                    mStreamThread.end();
+                }
+            }
+        }
+
+
+        @Override
+        public void onMtuChanged(int status, int newMtu){
+            synchronized (mLock) {
+                if (status == BLECentralChatEvents.MTU_CHANGE_SUCCEED) {
+                    showInfo("MTU changed to " + newMtu);
+                } else {
+                    showInfo("Error changing MTU. Falling back to " +  newMtu + " ...");
+                }
+                // Once the MTU has been changed, we start the thread for the transfer rate test
+                mStreamThread = new StreamThread();
+                mStreamThread.start();
             }
         }
     };
@@ -643,20 +792,238 @@ public class BluetoothChatFragment extends Fragment {
         @Override
         public void onConnectionError(String error) {
             synchronized (mLock){
+                if(mProgressBar != null){
+                    mProgressBar.dismiss();
+                    mProgressBar.hide();
+                }
+
                 showInfo("[!] Error : " + error);
             }
         }
+
+        @Override
+        public void onInitRfcommSocket(){
+            synchronized (mLock) {
+                ensureDiscoverable();
+                showInfo("RFCOMM: Socket listening...");
+            }
+        }
+
+        @Override
+        public void onConnectRfcommSocket(){
+            synchronized (mLock){
+                showInfo("RFCOMM: Client connected");
+            }
+        }
+
+        @Override
+        public void onData(byte [] data){
+            synchronized (mLock) {
+                save2File(data);
+            }
+        }
+
+        private int mLastLength = 0;
+        private long mStartingTime = 0;
+        private long mBytesPerSec = 0;
+        @Override
+        public void onDataStream(byte[] data){
+            synchronized (mLock){
+                if( mLastLength != data.length ) {
+                    showInfo("Received " + data.length + " bytes via BLE!");
+                    mLastLength = data.length;
+                    mHandler.post(new Runnable() {
+                      @Override
+                      public void run() {
+                          mProgressBar.show();
+                      }
+                    });
+                }
+
+                long now = System.currentTimeMillis();
+                if( mStartingTime == 0 ){
+                    mStartingTime = now;
+                }
+                if( mStartingTime + 1000 <= now ){
+                    showInfo( mBytesPerSec + " B/s");
+                    mBytesPerSec = mStartingTime = 0;
+                }
+
+                //showIncomingMessage("Msg length: " + data.length);
+                mBytesPerSec += data.length;
+                mProgressBarStatus += data.length;
+                mHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        mProgressBar.setProgress(mProgressBarStatus);
+                    }
+                });
+
+            }
+        }
+
+        @Override
+        public void onStreamSent(int status){
+            if(status == BLEChatEvents.SENT_SUCCEED){
+                mStreamThread.nextMessage();
+            }else{
+                mStreamThread.end();
+                showInfo("Error sending data!!");
+            }
+        }
+
     };
 
     private void processIncomingMsg(String msg){
         if(msg.startsWith("/")){
-            String[] tokens = msg.split(" ", 1);
+            String[] tokens = msg.split(" ", 2);
             if(tokens[0].compareTo("/name") == 0){
                 showConnectedName(tokens[1]);
+            }else if(tokens[0].compareTo("/send") == 0){
+                transferData();
             }
         }else{
             showIncomingMessage(msg);
         }
     }
 
+    /**
+     * Tries to connect to a RFCOMMSocket to achieve high-throughput transfer rates
+     *
+     */
+    private void transferData(){
+        if(mBleMode == BLEMode.PERIPHERAL ) {
+            // 1st - unleash RFCOMM Socket machinery...
+            BLEPeripheralHelper.getInstance().initRfcommService();
+            showInfo("Initializing RFCOMM socket...");
+        }
+    }
+
+    /**
+     * Saves the data byte array into a file
+     */
+    private void save2File(byte [] data){
+        File filepath = Environment.getExternalStorageDirectory();
+        String filePathName = filepath.getAbsolutePath() + "/BluetoothBLEChat/";
+        // Create a new folder in SD Card
+        File dir = new File(filePathName);
+        dir.mkdirs();
+        try {
+            BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(filePathName + "data.jpg"));
+            bos.write(data);
+            bos.flush();
+            bos.close();
+        }catch (FileNotFoundException ex){
+            showInfo(ex.toString());
+        }catch (IOException ex){
+            showInfo(ex.toString());
+        }finally {
+            BLEPeripheralHelper.getInstance().stopRfcommService();
+        }
+    }
+
+
+    private void setupProgressBar(Context cxt) {
+        if(mProgressBar == null) {
+            mProgressBar = new ProgressDialog(cxt);
+            mProgressBar.setCancelable(true);
+            mProgressBar.setMessage("Transferring data ...");
+            mProgressBar.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+            mProgressBar.setMax(1024 * 1024);
+        }
+    }
+
+    /**
+     * This class will help run the Transfer Rate Test
+     * It can send the data in two ways:
+     * 1 - Within a loop where we will write to characteristcs as fast as possible
+     * 2 - In an event-based way, where we will write to characteristics once we receive
+     *     the onCharacteristicWrite event from the BT stack.
+     */
+    private class StreamThread extends Thread {
+        private boolean mEnd = false;
+        private Semaphore mSemaphore = new Semaphore(0,true);
+        StreamThread(){ }
+
+        private void updateProgressBar(final int increment){
+            mHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mProgressBar.setProgress(increment);
+                }
+            });
+        }
+
+        private void hideProgressBar(){
+            mHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mProgressBar.dismiss();
+                    mProgressBar.hide();
+                }
+            });
+        }
+
+        private void showProgressBar(){
+            mHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mProgressBar.show();
+                }
+            });
+        }
+
+
+        private void sendViaLoop(){
+            int iMtu = BLECentralHelper.getInstance().getMtu();
+            long startTime = System.currentTimeMillis();
+            for(int iBytesSent = 0;!mEnd && iBytesSent < 1024 * 1024 ; iBytesSent += iMtu ) {
+                processOutgoingMsg("/transfer");
+                updateProgressBar(iBytesSent);
+            }
+            long difference = (System.currentTimeMillis() - startTime) / 1000;
+            showInfo("1 MB took " + difference + " secs to complete");
+        }
+
+        private void sendViaEvent(){
+            int iBytesSent = 0;
+            int iMtu = BLECentralHelper.getInstance().getMtu();
+            while(!mEnd && iBytesSent < 1024 * 1024) {
+                processOutgoingMsg("/transfer");
+                iBytesSent += iMtu;
+                updateProgressBar(iBytesSent);
+                try {
+                    mSemaphore.acquire();
+                }catch (InterruptedException ex){
+                    mBLEChatEvents.onConnectionError("Interrupted while in a semaphore!!");
+                }
+            }
+        }
+
+        /**
+         * Releases the semaphore, so we can send the next message. It's only used when sending
+         * messages via events.
+         */
+        public void nextMessage(){
+            mSemaphore.release();
+        }
+
+        public void run(){
+            showProgressBar();
+            try {
+                Thread.sleep(2000);
+                sendViaEvent();
+                //sendViaLoop();
+            }catch (InterruptedException ex){
+                mBLEChatEvents.onConnectionError("Interrupted while sleeping!!!");
+            }finally {
+                hideProgressBar();
+            }
+        }
+
+        public void end(){
+            mEnd = true;
+        }
+    }
 }
+
