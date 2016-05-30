@@ -143,7 +143,7 @@ public class BluetoothChatFragment extends Fragment {
         if (!mBluetoothAdapter.isEnabled()) {
             Intent enableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
             startActivityForResult(enableIntent, REQUEST_ENABLE_BT);
-            // Otherwise, setup the chat sessionbuffer
+            // Otherwise, setup the chat session
         } else if (mChatService == null) {
             setupChat();
         }
@@ -164,13 +164,13 @@ public class BluetoothChatFragment extends Fragment {
         // Performing this check in onResume() covers the case in which BT wasbuffer
         // not enabled during onStart(), so we were paused to enable it...
         // onResume() will be called when ACTION_REQUEST_ENABLE activity returns.
-        /*if (mChatService != null) {
+        if (mChatService != null) {
             // Only if the state is STATE_NONE, do we know that we haven't started already
             if (mChatService.getState() == BluetoothChatService.STATE_NONE) {
                 // Start the Bluetooth chat services
                 mChatService.start();
             }
-        }*/
+        }
     }
 
     @Override
@@ -261,8 +261,10 @@ public class BluetoothChatFragment extends Fragment {
     }
 
     private synchronized void sendMessage(String message) {
-        //sendMessageViaClassicBT(message);
-        sendMessageViaBLE(message);
+        if(mBleMode != BLEMode.NONE)
+            sendMessageViaBLE(message);
+        else
+            sendMessageViaClassicBT(message);
     }
 
     private synchronized void sendMessageViaClassicBT(String message) {
@@ -510,6 +512,7 @@ public class BluetoothChatFragment extends Fragment {
                 .getString(DeviceListActivity.EXTRA_DEVICE_ADDRESS);
         // Get the BluetoothDevice object
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
+        mBleMode = BLEMode.NONE;
         // Attempt to connect to the device
         mChatService.connect(device, secure);
     }
@@ -523,12 +526,16 @@ public class BluetoothChatFragment extends Fragment {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.secure_connect_scan: {
+                if(mChatService != null)
+                    mChatService.start();
                 // Launch the DeviceListActivity to see devices and do scan
                 Intent serverIntent = new Intent(getActivity(), DeviceListActivity.class);
                 startActivityForResult(serverIntent, REQUEST_CONNECT_DEVICE_SECURE);
                 return true;
             }
             case R.id.insecure_connect_scan: {
+                if(mChatService != null)
+                    mChatService.start();
                 // Launch the DeviceListActivity to see devices and do scan
                 Intent serverIntent = new Intent(getActivity(), DeviceListActivity.class);
                 startActivityForResult(serverIntent, REQUEST_CONNECT_DEVICE_INSECURE);
@@ -610,6 +617,8 @@ public class BluetoothChatFragment extends Fragment {
      */
     private void connectBleDevice(Intent data){
         mBleMode = BLEMode.CENTRAL;
+        if(mChatService != null)
+            mChatService.stop();
         mConnectedDeviceName = data.getExtras().getString(BLEDiscoveringActivity.EXTRA_DEVICE_NAME);
         String address = data.getExtras().getString(BLEDiscoveringActivity.EXTRA_DEVICE_ADDRESS);
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
@@ -760,6 +769,8 @@ public class BluetoothChatFragment extends Fragment {
      */
     private void bleDeviceConnecting(Intent data){
         mBleMode = BLEMode.PERIPHERAL;
+        if(mChatService != null)
+            mChatService.stop();
         //showConnectedName(data.getExtras().getString(BLEAdvertisingActivity.EXTRA_CLIENT_NAME));
         showStatus(BluetoothChatService.STATE_CONNECTED);
         BLEPeripheralHelper.getInstance().register(mBlePeripheralChatEvents);
